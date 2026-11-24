@@ -1,0 +1,26 @@
+{
+  "psutil": {
+    "version": "7.2.2",
+    "sdistUrl": "https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz",
+    "sdistSha256": "0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372",
+    "expectedWheelFileName": "psutil-7.2.2-cp37-abi3-win32.whl"
+  },
+  "pip": {
+    "version": "26.2.2",
+    "wheelUrl": "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+    "wheelSha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
+    "wheelFileName": "pip-26.2.2-py3-none-any.whl"
+  },
+  "setuptools": {
+    "version": "84.2.1",
+    "wheelUrl": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl",
+    "wheelSha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+    "wheelFileName": "setuptools-84.2.1-py3-none-any.whl"
+  },
+  "pygtkwin": {
+    "releaseTag": "v2026-10-13",
+    "archiveUrl": "https://github.com/bleachbit/pygtkwin/releases/download/v2026-10-13/gtk3.24-x86-windows.7z",
+    "archiveSha256": "d3fd28959ab69ceb185a3f22cfe03bd6f00ab4f7e896621b850e377913a992f3",
+    "archiveFileName": "gtk3.24-x86-windows.7z"
+  }
+}

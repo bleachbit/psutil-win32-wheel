@@ -1,0 +1,10 @@
+build/
+artifacts/
+compare-output/
+release-stage/
+release-notes.md
+__pycache__/
+*.py[cod]
+*.whl
+SHA256SUMS*.txt
+BUILD-INFO*.txt

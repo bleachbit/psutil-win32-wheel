@@ -1,0 +1,146 @@
+name: Build psutil win32 wheel
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and smoke test replica ${{ matrix.replica }}
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: ['1', '2']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build wheel
+        id: build
+        shell: pwsh
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: ./scripts/Build-PsutilWheel.ps1 -Replica $env:REPLICA
+
+      - name: Smoke test wheel
+        shell: pwsh
+        env:
+          WHEEL_PATH: ${{ steps.build.outputs.wheel-path }}
+          PYTHON_PATH: ${{ steps.build.outputs.python-path }}
+        run: ./scripts/Test-PsutilWheel.ps1 -Wheel $env:WHEEL_PATH -Python $env:PYTHON_PATH
+
+      - name: Upload replica wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.build.outputs.wheel-artifact }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload replica SHA256SUMS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.build.outputs.sha256-file }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload replica build information
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.build.outputs.build-info-file }}
+          archive: false
+          if-no-files-found: error
+
+  compare:
+    name: Compare independent builds
+    runs-on: windows-2025
+    timeout-minutes: 10
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compare replicas
+        id: compare
+        shell: pwsh
+        run: ./scripts/Compare-PsutilWheels.ps1 -ArtifactsDir artifacts -OutputDir compare-output
+
+      - name: Upload release wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.compare.outputs.final-wheel }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload release SHA256SUMS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.compare.outputs.sha256sums }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload release build information
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ steps.compare.outputs.build-info }}
+          archive: false
+          if-no-files-found: error
+
+  release:
+    name: Publish immutable release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-2025
+    timeout-minutes: 15
+    needs: compare
+    permissions:
+      contents: write # create and update the GitHub release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare release assets
+        id: prepare
+        shell: pwsh
+        run: ./scripts/Prepare-PsutilRelease.ps1 -ArtifactsDir artifacts -StagingDir release-stage -NotesFile release-notes.md
+
+      - name: Publish and verify release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/Publish-PsutilRelease.ps1 -Tag $env:RELEASE_TAG -StagingDir release-stage -NotesFile release-notes.md
