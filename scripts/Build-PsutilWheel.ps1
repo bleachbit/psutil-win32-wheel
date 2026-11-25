@@ -53,14 +53,19 @@ function Get-VerifiedDownload {
     Write-Host "SHA256 verified for $(Split-Path -Leaf $OutFile): $hash"
 }
 
-function Get-FirstNativeLine {
-    param([Parameter(Mandatory)][string]$Command)
+function Get-NativeVersionLine {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][string]$Pattern
+    )
     $oldPreference = $PSNativeCommandUseErrorActionPreference
     $PSNativeCommandUseErrorActionPreference = $false
     try {
-        $line = & $Command 2>&1 | Select-Object -First 1
+        $line = & $Command 2>&1 |
+            Where-Object { $_.ToString() -match $Pattern } |
+            Select-Object -First 1
         if ($null -eq $line) {
-            return ''
+            throw "Could not find a version line matching '$Pattern' in $Command output"
         }
         return $line.ToString().Trim()
     }
@@ -199,8 +204,8 @@ if (-not (Get-Command link -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command dumpbin -ErrorAction SilentlyContinue)) {
     throw 'dumpbin.exe is not available after entering the Visual Studio developer environment'
 }
-$compilerVersion = Get-FirstNativeLine -Command 'cl'
-$linkerVersion = Get-FirstNativeLine -Command 'link'
+$compilerVersion = Get-NativeVersionLine -Command 'cl' -Pattern 'C/C\+\+.*Compiler Version'
+$linkerVersion = Get-NativeVersionLine -Command 'link' -Pattern 'Incremental Linker Version'
 Write-Host "Compiler: $compilerVersion"
 Write-Host "Linker: $linkerVersion"
 
