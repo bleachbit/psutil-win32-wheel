@@ -17,61 +17,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build and smoke test replica ${{ matrix.replica }}
-    runs-on: windows-2025
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        replica: ['1', '2']
+  replica-1:
+    name: Replica 1
+    uses: $/.github/workflows/build-replica.yaml
+    with:
+      replica: '1'
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Build wheel
-        id: build
-        shell: pwsh
-        env:
-          REPLICA: ${{ matrix.replica }}
-        run: ./scripts/Build-PsutilWheel.ps1 -Replica $env:REPLICA
-
-      - name: Smoke test wheel
-        shell: pwsh
-        env:
-          WHEEL_PATH: ${{ steps.build.outputs.wheel-path }}
-          PYTHON_PATH: ${{ steps.build.outputs.python-path }}
-        run: ./scripts/Test-PsutilWheel.ps1 -Wheel $env:WHEEL_PATH -Python $env:PYTHON_PATH
-
-      - name: Upload replica wheel
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          path: ${{ steps.build.outputs.wheel-artifact }}
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload replica SHA256SUMS
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          path: ${{ steps.build.outputs.sha256-file }}
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload replica build information
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          path: ${{ steps.build.outputs.build-info-file }}
-          archive: false
-          if-no-files-found: error
+  replica-2:
+    name: Replica 2
+    uses: $/.github/workflows/build-replica.yaml
+    with:
+      replica: '2'
 
   compare:
     name: Compare independent builds
     runs-on: windows-2025
     timeout-minutes: 10
-    needs: build
+    needs: [replica-1, replica-2]
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Checkout repository
@@ -79,44 +43,101 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download build artifacts
+      - name: Require two distinct artifact IDs
+        shell: pwsh
+        env:
+          REPLICA_1_ID: ${{ needs.replica-1.outputs.artifact-id }}
+          REPLICA_2_ID: ${{ needs.replica-2.outputs.artifact-id }}
+        run: |
+          # An empty artifact-ids input would download every artifact in the run.
+          if ($env:REPLICA_1_ID -cnotmatch '\A[1-9][0-9]*\z' -or
+              $env:REPLICA_2_ID -cnotmatch '\A[1-9][0-9]*\z' -or
+              $env:REPLICA_1_ID -eq $env:REPLICA_2_ID) {
+              throw 'Expected one unique artifact ID from each replica'
+          }
+
+      - name: Download replica 1 by ID
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: artifacts
-          merge-multiple: true
+          artifact-ids: ${{ needs.replica-1.outputs.artifact-id }}
+          path: artifacts/replica1
+
+      - name: Download replica 2 by ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.replica-2.outputs.artifact-id }}
+          path: artifacts/replica2
 
       - name: Compare replicas
         id: compare
         shell: pwsh
         run: ./scripts/Compare-PsutilWheels.ps1 -ArtifactsDir artifacts -OutputDir compare-output
 
-      - name: Upload release wheel
+      - name: Upload compared release bundle
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: ${{ steps.compare.outputs.final-wheel }}
-          archive: false
+          name: psutil-release-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ steps.compare.outputs.final-wheel }}
+            ${{ steps.compare.outputs.sha256sums }}
+            ${{ steps.compare.outputs.build-info }}
+          compression-level: 0
           if-no-files-found: error
 
-      - name: Upload release SHA256SUMS
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          path: ${{ steps.compare.outputs.sha256sums }}
-          archive: false
-          if-no-files-found: error
+  check-release-tag:
+    name: Check release tag
+    if: github.event_name == 'push' && github.ref_type == 'tag' && github.event.created
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
 
-      - name: Upload release build information
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+    steps:
+      - name: Fetch main history and release tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: ${{ steps.compare.outputs.build-info }}
-          archive: false
-          if-no-files-found: error
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a protected tag on a green main commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF_PROTECTED" != true ]]; then
+            echo '::error::The release tag must be covered by an active GitHub ruleset.'
+            exit 1
+          fi
+
+          tag_commit=$(git rev-parse --verify "${GITHUB_REF}^{commit}")
+          event_commit=$(git rev-parse --verify "${GITHUB_SHA}^{commit}")
+          if [[ "$tag_commit" != "$event_commit" ]]; then
+            echo '::error::The release tag no longer points to the triggering commit.'
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$tag_commit" HEAD; then
+            echo '::error::The release tag must point to a commit on main.'
+            exit 1
+          fi
+
+          passed_run=$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow build-psutil-win32.yaml --branch main --commit "$tag_commit" \
+            --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [[ -z "$passed_run" ]]; then
+            echo '::error::The tagged commit has no successful build workflow run from a push to main.'
+            exit 1
+          fi
+          echo "Tagged commit $tag_commit passed main build run $passed_run."
 
   release:
     name: Publish immutable release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && github.ref_type == 'tag' && github.event.created
     runs-on: windows-2025
     timeout-minutes: 15
-    needs: compare
+    needs: [compare, check-release-tag]
     permissions:
       contents: write # create and update the GitHub release
 
@@ -126,11 +147,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download all artifacts
+      - name: Require the compared artifact ID
+        shell: pwsh
+        env:
+          RELEASE_ARTIFACT_ID: ${{ needs.compare.outputs.artifact-id }}
+        run: |
+          if ($env:RELEASE_ARTIFACT_ID -cnotmatch '\A[1-9][0-9]*\z') {
+              throw 'Expected one artifact ID from the compare job'
+          }
+
+      - name: Download compared release bundle by ID
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          artifact-ids: ${{ needs.compare.outputs.artifact-id }}
           path: artifacts
-          merge-multiple: true
 
       - name: Prepare release assets
         id: prepare

@@ -1,0 +1,55 @@
+name: Build psutil wheel replica
+
+on:
+  workflow_call:
+    inputs:
+      replica:
+        required: true
+        type: string
+    outputs:
+      artifact-id:
+        description: ID of this replica's wheel and build evidence
+        value: ${{ jobs.build.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and smoke test
+    runs-on: windows-2025
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build wheel
+        id: build
+        shell: pwsh
+        env:
+          REPLICA: ${{ inputs.replica }}
+        run: ./scripts/Build-PsutilWheel.ps1 -Replica $env:REPLICA
+
+      - name: Smoke test wheel
+        shell: pwsh
+        env:
+          WHEEL_PATH: ${{ steps.build.outputs.wheel-path }}
+          PYTHON_PATH: ${{ steps.build.outputs.python-path }}
+        run: ./scripts/Test-PsutilWheel.ps1 -Wheel $env:WHEEL_PATH -Python $env:PYTHON_PATH
+
+      - name: Upload replica bundle
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: psutil-replica-${{ inputs.replica }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ steps.build.outputs.wheel-artifact }}
+            ${{ steps.build.outputs.sha256-file }}
+            ${{ steps.build.outputs.build-info-file }}
+          compression-level: 0
+          if-no-files-found: error
