@@ -34,10 +34,11 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $replicaResults = @{}
 
 for ($replica = 1; $replica -le $ExpectedReplicaCount; $replica++) {
+    $replicaDir = Join-Path $ArtifactsDir "replica$replica"
     $carrierName = $expectedWheelName -replace '\.whl$', ".replica$replica.whl"
-    $carrierPath = Join-Path $ArtifactsDir $carrierName
-    $hashPath = Join-Path $ArtifactsDir "SHA256SUMS.replica$replica.txt"
-    $buildInfoPath = Join-Path $ArtifactsDir "BUILD-INFO.replica$replica.txt"
+    $carrierPath = Join-Path $replicaDir $carrierName
+    $hashPath = Join-Path $replicaDir "SHA256SUMS.replica$replica.txt"
+    $buildInfoPath = Join-Path $replicaDir "BUILD-INFO.replica$replica.txt"
 
     foreach ($path in @($carrierPath, $hashPath, $buildInfoPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
